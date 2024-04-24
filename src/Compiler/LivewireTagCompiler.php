@@ -4,15 +4,16 @@ namespace TomasVotruba\Bladestan\Compiler;
 
 use Illuminate\View\AnonymousComponent;
 use Illuminate\View\Compilers\ComponentTagCompiler;
+use Livewire\Exceptions\ComponentAttributeMissingOnDynamicComponentException;
 
 class LivewireTagCompiler extends ComponentTagCompiler
 {
-    public function compile(string $value): string
+    public function compile($value)
     {
         return $this->compileLivewireSelfClosingTags($value);
     }
 
-    protected function compileLivewireSelfClosingTags(string $value): string
+    protected function compileLivewireSelfClosingTags($value)
     {
         $pattern = "/
             <
@@ -43,60 +44,38 @@ class LivewireTagCompiler extends ComponentTagCompiler
             $attributes = $this->getAttributesFromAttributeString($matches['attributes']);
 
             // Convert all kebab-cased to camelCase.
-            $attributes = collect($attributes)
-                ->mapWithKeys(function ($value, $key) {
-                    // Skip snake_cased attributes.
-                    if (is_int($key) || str($key)->contains('_')) {
-                        return [
-                            strval($key) => $value,
-                        ];
-                    }
+            $attributes = collect($attributes)->mapWithKeys(function ($value, $key) {
+                // Skip snake_cased attributes.
+                if (str($key)->contains('_')) return [$key => $value];
 
-                    return [
-                        (string) str($key)
-                            ->camel() => $value,
-                    ];
-                })->toArray();
+                return [(string) str($key)->camel() => $value];
+            })->toArray();
 
             // Convert all snake_cased attributes to camelCase, and merge with
             // existing attributes so both snake and camel are available.
-            $attributes = collect($attributes)
-                ->mapWithKeys(function ($value, $key) {
-                    // Skip snake_cased attributes
-                    if (! str($key)->contains('_')) {
-                        return [
-                            strval($key) => false,
-                        ];
-                    }
+            $attributes = collect($attributes)->mapWithKeys(function ($value, $key) {
+                // Skip snake_cased attributes
+                if (! str($key)->contains('_')) return [$key => false];
 
-                    return [
-                        (string) str($key)
-                            ->camel() => $value,
-                    ];
-                })->filter()
-                ->merge($attributes)
-                ->toArray();
+                return [(string) str($key)->camel() => $value];
+            })->filter()->merge($attributes)->toArray();
 
             $component = $matches[1];
 
-            if ($component === 'styles') {
-                return '@livewireStyles';
-            }
-            if ($component === 'scripts') {
-                return '@livewireScripts';
-            }
+            if ($component === 'styles') return '@livewireStyles';
+            if ($component === 'scripts') return '@livewireScripts';
             if ($component === 'dynamic-component' || $component === 'is') {
-                if (! isset($attributes['component'])) {
-                    $dynamicComponentExists = rescue(// Need to run this in rescue otherwise running this during a test causes Livewire directory not found exception
-                        fn () => $component === 'dynamic-component' && app('livewire')
-                            ->getClass('dynamic-component')
-                    );
+                if(! isset($attributes['component'])) {
+                    $dynamicComponentExists = rescue(function() use ($component, $attributes) {
+                        // Need to run this in rescue otherwise running this during a test causes Livewire directory not found exception
+                        return $component === 'dynamic-component' && app('livewire')->getClass('dynamic-component');
+                    });
 
-                    if ($dynamicComponentExists) {
+                    if($dynamicComponentExists) {
                         return $this->componentString("'{$component}'", $attributes);
                     }
 
-                    throw new \Exception('Dynamic component tag is missing component attribute.');
+                    throw new ComponentAttributeMissingOnDynamicComponentException;
                 }
 
                 // Does not need quotes as resolved with quotes already.
@@ -109,32 +88,24 @@ class LivewireTagCompiler extends ComponentTagCompiler
             }
 
             return $this->componentString($component, $attributes);
-        }, $value) ?? throw new \Exception('preg_replace_callback error');
+        }, $value);
     }
 
-    /**
-     * @param array<string, mixed> $attributes
-     */
-    protected function componentString(string $component, array $attributes): string
+    protected function componentString(string $component, array $attributes)
     {
         $class = AnonymousComponent::class;
         $attrString = $this->attributesToString($attributes, $escapeBound = false);
-        return "<?php echo {$class}::resolve([{$attrString}])->render(); ?>";
+        return "<?php echo $class::resolve([$attrString])->render(); ?>";
     }
 
-    /**
-     * @param array<string, mixed> $attributes
-     */
     protected function attributesToString(array $attributes, $escapeBound = true)
     {
         return collect($attributes)
-            ->map(
-                fn (string $value, string $attribute) => $escapeBound && isset($this->boundAttributes[$attribute]) && $value !== 'true' && ! is_numeric(
-                    $value
-                )
-                        ? "'{$attribute}' => \Illuminate\View\Compilers\BladeCompiler::sanitizeComponentAttribute({$value})"
-                        : "'{$attribute}' => {$value}"
-            )
-            ->implode(',');
+                ->map(function (string $value, string $attribute) use ($escapeBound) {
+                    return $escapeBound && isset($this->boundAttributes[$attribute]) && $value !== 'true' && ! is_numeric($value)
+                                ? "'{$attribute}' => \Illuminate\View\Compilers\BladeCompiler::sanitizeComponentAttribute({$value})"
+                                : "'{$attribute}' => {$value}";
+                })
+                ->implode(',');
     }
 }

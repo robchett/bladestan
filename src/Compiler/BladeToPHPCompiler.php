@@ -77,12 +77,28 @@ STRING;
         // Disable component rendering
         // It happens before our pre-processer can intercept the compile
         $this->bladeCompiler->withoutComponentTags();
+        $data = \Safe\json_decode(
+            $this->fileSystem->get(\Safe\getcwd() . '/storage/framework/testing/bladestan-aliases.json'),
+            true
+        );
+        foreach ($data['aliases'] ?? [] as $alias => $class) {
+            $this->bladeCompiler->component($class, $alias);
+        }
+        foreach ($data['namespaces'] ?? [] as $namespace => $hints) {
+            $this->fileViewFinder->addNamespace($namespace, $hints);
+        }
+        foreach ($data['paths'] ?? [] as $path) {
+            $this->fileViewFinder->addLocation($path);
+        }
+
         // Replaces <livewire /> tags with arrays so attributes can be analysed
         $this->bladeCompiler->precompiler(fn ($string) => app(LivewireTagCompiler::class)->compile($string));
         // Replaces <x-... /> tags with arrays so attributes can be analysed
-        $this->bladeCompiler->precompiler(
-            fn (string $value) => (new ComponentTagCompiler($this->bladeCompiler))->compile($value)
-        );
+        $this->bladeCompiler->precompiler(fn (string $value) => (new ComponentTagCompiler(
+            $this->bladeCompiler->getClassComponentAliases(),
+            $this->bladeCompiler->getClassComponentNamespaces(),
+            $this->bladeCompiler
+        ))->compile($value));
         $this->setupBladeComponents();
     }
 
