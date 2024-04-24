@@ -28,7 +28,7 @@ final class VarDocNodeFactory
     {
         $prependVarTypesDocBlocks = sprintf(
             '/** @var %s $%s */',
-            $variableAndType->getTypeAsString(),
+            preg_replace('/\$this\((.*?)\)/', '$1', $variableAndType->getTypeAsString()),
             $variableAndType->getVariable()
         );
 
